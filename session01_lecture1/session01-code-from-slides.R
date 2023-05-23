@@ -154,12 +154,4 @@ UA_flights <- flights %>%
 (
   UA_flights <- flights %>% 
   filter(carrier == "UA")
-  
 )
-
-glimpse(flights)
-
-flights %>%
-  group_by(carrier) %>%
-  summarise(mean_dep_delay = mean(dep_delay, na.rm = TRUE), mean_arr_delay = mean(arr_delay, na.rm = TRUE), count = n()) %>% 
-  arrange(desc(count))
