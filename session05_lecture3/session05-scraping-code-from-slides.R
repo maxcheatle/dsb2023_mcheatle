@@ -66,20 +66,19 @@ gettysburg_address %>%
 # with Chrome
 gettysburg_address %>%
   html_elements(css = "#block-system-main > div > div > div.col-sm-8 > div.field-docs-person > div > div.field-title > h3 > a")
-                       # Got his via Chrome inspect element, highlight what you want, then right click on element tab and copy the selector
 
                   
 ## Get attributes and text of elements
 
 
 gettysburg_address %>%
-  html_elements(css = "#block-system-main > div > div > div.col-sm-8 > div.field-docs-person > div > div.field-title > h3 > a")
+  html_elements(css = ".diet-title > a:nth-child(1)")
 
 #| label: get-speaker-link
 #| code-line-numbers: "3"
 
 speaker_link <- gettysburg_address %>%
-  html_elements(css = "#block-system-main > div > div > div.col-sm-8 > div.field-docs-person > div > div.field-title > h3 > a") %>%
+  html_elements(css = ".diet-title > a:nth-child(1)") %>%
   html_attr("href")
 
 speaker_link
@@ -89,7 +88,7 @@ speaker_link
 #| code-line-numbers: "3"
 
 speaker <- gettysburg_address %>%
-  html_elements(css = "#block-system-main > div > div > div.col-sm-8 > div.field-docs-person > div > div.field-title > h3 > a") %>%
+  html_elements(css = ".diet-title > a:nth-child(1)") %>%
   html_text2() # Select text of element
 
 speaker
@@ -129,7 +128,6 @@ url_data <- tibble(
 )
 
 
-url_data
                   
                   
 ## `get_address()` to scrape any presidential address{.smaller}
