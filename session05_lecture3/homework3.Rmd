@@ -1,6 +1,6 @@
 ---
 title: "Homework 3: Databases, web scraping, and a basic Shiny app"
-author: "Your name goes here"
+author: "Max Cheatle"
 date: "`r Sys.Date()`"
 output:
   html_document:
@@ -34,18 +34,18 @@ library(robotstxt) # check if we're allowed to scrape the data
 library(scales)
 library(sf)
 library(readxl)
+
 ```
 
 # Money in UK politics
 
-[The Westminster Accounts](https://news.sky.com/story/the-westminster-accounts-12786091), a recent collaboration between Sky News and Tortoise Media, examines the flow of money through UK politics. It does so by combining data from three key sources: 
+[The Westminster Accounts](https://news.sky.com/story/the-westminster-accounts-12786091), a recent collaboration between Sky News and Tortoise Media, examines the flow of money through UK politics. It does so by combining data from three key sources:
 
-1. [Register of Members’ Financial Interests](https://www.parliament.uk/mps-lords-and-offices/standards-and-financial-interests/parliamentary-commissioner-for-standards/registers-of-interests/register-of-members-financial-interests/), 
-1. [Electoral Commission records of donations to parties](http://search.electoralcommission.org.uk/English/Search/Donations), and
-1. [Register of All-Party Parliamentary Groups](https://www.parliament.uk/mps-lords-and-offices/standards-and-financial-interests/parliamentary-commissioner-for-standards/registers-of-interests/register-of-all-party-party-parliamentary-groups/). 
+1.  [Register of Members' Financial Interests](https://www.parliament.uk/mps-lords-and-offices/standards-and-financial-interests/parliamentary-commissioner-for-standards/registers-of-interests/register-of-members-financial-interests/),
+2.  [Electoral Commission records of donations to parties](http://search.electoralcommission.org.uk/English/Search/Donations), and
+3.  [Register of All-Party Parliamentary Groups](https://www.parliament.uk/mps-lords-and-offices/standards-and-financial-interests/parliamentary-commissioner-for-standards/registers-of-interests/register-of-all-party-party-parliamentary-groups/).
 
-You can [search and explore the results](https://news.sky.com/story/westminster-accounts-search-for-your-mp-or-enter-your-full-postcode-12771627) through the collaboration’s interactive database. Simon Willison [has extracted a database](https://til.simonwillison.net/shot-scraper/scraping-flourish) and this is what we will be working with. If you want to read more about [the project’s methodology](https://www.tortoisemedia.com/2023/01/08/the-westminster-accounts-methodology/).
-
+You can [search and explore the results](https://news.sky.com/story/westminster-accounts-search-for-your-mp-or-enter-your-full-postcode-12771627) through the collaboration's interactive database. Simon Willison [has extracted a database](https://til.simonwillison.net/shot-scraper/scraping-flourish) and this is what we will be working with. If you want to read more about [the project's methodology](https://www.tortoisemedia.com/2023/01/08/the-westminster-accounts-methodology/).
 
 ## Open a connection to the database
 
@@ -64,37 +64,191 @@ How many tables does the database have?
 DBI::dbListTables(sky_westminster)
 ```
 
-## Which MP has received the most amount of money? 
+## Which MP has received the most amount of money?
 
 You need to work with the `payments` and `members` tables and for now we just want the total among all years. To insert a new, blank chunk of code where you can write your beautiful code (and comments!), please use the following shortcut: `Ctrl + Alt + I` (Windows) or `cmd + option + I` (mac)
 
+```{r}
+
+# First I am setting up the tables as database objects, so that I can manipulate them as dataframes
+
+payments_db <- dplyr::tbl(sky_westminster, "payments")
+members_db <- dplyr::tbl(sky_westminster, "members")
+
+# Checking outputs.... looks good
+
+#view(payments_db)
+#view(members_db)
+
+# We could jump straight to a join here, but I'll summarise on payments first to keep it easier to follow
+
+id_payments <- payments_db %>% 
+  
+  # Grouping by member_id for summation
+  group_by(member_id) %>% 
+  
+  # Summing the value of all payments to each member_id
+  summarise(total_recieved = sum(value))
+  
+# Now I want to join to the members table, where payments_db$member_id = members_db$id
+
+member_payments <- left_join(id_payments, members_db, by = c("member_id" = "id"))
+
+# Now let's take that table to see who's getting the most cash
+
+member_payments %>% 
+  select(member_id, name, total_recieved) %>% 
+  arrange(desc(total_recieved))
+
+```
+
+-   Looks like Theresa May is a favorite for donors!
 
 ## Any `entity` that accounts for more than 5% of all donations?
 
 Is there any `entity` whose donations account for more than 5% of the total payments given to MPs over the 2020-2022 interval? Who are they and who did they give money to?
 
+```{r}
+
+# Let's find out which entity is splashing big cash
+
+# First let me find the total amount of donations in our payments_db dataframe
+
+total_donos <- payments_db %>% 
+  summarise(total_donos = sum(value)) %>% 
+  pull(total_donos)
+
+# Then do the same, but on an entity-by-entity basis
+
+entity_donos <- payments_db %>% 
+  group_by(entity) %>% 
+  summarise(entity_donos = sum(value))
+
+# Finally, a simple caluclation to work out the percentages
+
+entity_donos %>% 
+  mutate(pct_donos = entity_donos/total_donos*100) %>% 
+  arrange(desc(pct_donos)) 
+  
+```
+
+-   Withers LLP's donations account for 5.3% of total donations!
+
 ## Do `entity` donors give to a single party or not?
 
-- How many distinct entities who paid money to MPS are there?
-- How many (as a number and %) donated to MPs belonging to a single party only?
+-   How many distinct entities who paid money to MPS are there?
+-   How many (as a number and %) donated to MPs belonging to a single party only?
 
+```{r}
 
-## Which party has raised the greatest amount of money in each of the years 2020-2022? 
+# First let's get a list of the distinct entities and count them
 
-I would like you to write code that generates the following table. 
+# Saving the value for use later
+total_entities <- payments_db %>% 
+  distinct(entity) %>% 
+  summarise(entities = n()) %>% 
+  pull(entities)
+
+total_entities
+
+# Now let's find out who only donates to one party
+
+entity_parties <- payments_db %>% 
+  
+  # Joining payments and members, since members has party_id which we need
+  left_join(members_db, by = c("member_id" = "id")) %>% 
+  select(entity, party_id) %>% 
+  arrange(desc(entity)) %>% 
+  
+  # Now selecting the distinct entity and party_id rows
+  distinct(entity, party_id) %>% 
+  
+  # Grouping by entity for incoming calculation
+  group_by(entity) %>% 
+  
+  # Counting the number of parties that each entity donates to
+  summarise(parties_dono = n()) %>% 
+  
+  # Converting the number of parties donated to, to a categorical single/multiple variable
+   mutate(parties_dono = case_when(
+    parties_dono > 1 ~ "Multiple",
+    TRUE ~ "Single"
+  )) %>% 
+  
+  # Grouping by our new categorical variable
+  group_by(parties_dono) %>% 
+  
+  # And counting the respective instances of single/multiple donors
+  summarise(count = n())
+
+ # Now presenting the answers
+
+entity_parties %>% 
+  
+  # Creating a pct column, using the total_entities saved from the start of this chunk
+  mutate(pct_multiple = as.numeric(count)/total_entities*100)
+
+```
+
+-   There are 2213 distinct donor entities, of which only 8% (177) donate to multiple parties
+
+## Which party has raised the greatest amount of money in each of the years 2020-2022?
+
+I would like you to write code that generates the following table
 
 ```{r echo=FALSE, out.width="80%"}
 knitr::include_graphics(here::here("images", "total_donations_table.png"), error = FALSE)
+
+yearly_payments <-
+  
+  payments_db %>% 
+    
+    # Opted to use sql() here, as I'm fluent in SQL and couldn't find a reliable way to do this using dplyr. I found a working method, but it then causes issues with the upcoming joins
+    mutate(year = as.integer(sql("SUBSTR(date, -4)"))) %>% 
+    filter(year >= 2020) %>% 
+
+    # We now need the join with the members table where the party_id is stored
+    left_join(members_db, by = c("member_id" = "id")) %>% 
+  
+    # Again, just reducing to the necessary cols  
+    select(year, member_id, value, party_id) %>% 
+   
+    # Left joining to parties_db, which has the party names
+    left_join(parties_db, by = c("party_id" = "id")) %>% 
+    
+    # Grouping by year and party name for sum
+    group_by(year, name) %>%
+    summarise(total_year_donatations = sum(value)) %>%
+    
+    # Now ungrouping to find total per year and calculate percentage
+    ungroup(name) %>%
+    mutate(prop = total_year_donatations / sum(total_year_donatations) * 100)
+
+yearly_payments
+  
+# My numbers here are different, but I really can't understand why. I also noticed that some parties don't appear every year in the screenshot attached - perhaps this is where I'm going wrong. I've also iteratively consulted ChatGPT and it seems not be getting any different numbers.   
 ```
 
-
-... and then, based on this data, plot the following graph. 
+... and then, based on this data, plot the following graph.
 
 ```{r echo=FALSE, out.width="80%"}
 knitr::include_graphics(here::here("images", "total_donations_graph.png"), error = FALSE)
+
+yearly_payments %>% 
+  
+    # Now plotting, making sure to reorder our fill
+    ggplot(aes(y = total_year_donatations, x = year, fill = fct_reorder(name, -total_year_donatations))) +
+  
+    # position = "dodge" to prevent stacking
+    geom_bar(stat = "identity", position = "dodge") +
+  
+    # Aesthetics
+    theme_minimal() +
+    labs(title = "Conservatives have captured the majority of political donations", subtitle = "Donations to public parties, 2020-2022", x = NULL, y = NULL, fill = "Party")
+
 ```
 
-This uses the default ggplot colour pallete, as I dont want you to worry about using the [official colours for each party](https://en.wikipedia.org/wiki/Wikipedia:Index_of_United_Kingdom_political_parties_meta_attributes). However, I would like you to ensure the parties are sorted according to total donations and not alphabetically. You may even want to remove some of the smaller parties that hardly register on the graph. Would facetting help you?  
+This uses the default ggplot colour pallete, as I dont want you to worry about using the [official colours for each party](https://en.wikipedia.org/wiki/Wikipedia:Index_of_United_Kingdom_political_parties_meta_attributes). However, I would like you to ensure the parties are sorted according to total donations and not alphabetically. You may even want to remove some of the smaller parties that hardly register on the graph. Would facetting help you?
 
 Finally, when you are done working with the databse, make sure you close the connection, or disconnect from the database.
 
@@ -102,14 +256,13 @@ Finally, when you are done working with the databse, make sure you close the con
 dbDisconnect(sky_westminster)
 ```
 
-
 # Anonymised Covid patient data from the CDC
 
 We will be using a dataset with [anonymous Covid-19 patient data that the CDC publishes every month](https://data.cdc.gov/Case-Surveillance/COVID-19-Case-Surveillance-Public-Use-Data-with-Ge/n8mc-b4w4). The file we will use was released on April 11, 2023, and has data on 98 million of patients, with 19 features. This file cannot be loaded in memory, but luckily we have the data in `parquet` format and we will use the `{arrow}` package.
 
 ## Obtain the data
 
-The dataset `cdc-covid-geography` in in `parquet` format that {arrow}can handle. It is > 600Mb and too large to be hosted on Canvas or Github, so please download it from dropbox https://www.dropbox.com/sh/q1yk8mmnbbrzavl/AAAxzRtIhag9Nc_hODafGV2ka?dl=0 and save it in your `dsb` repo, under the `data` folder
+The dataset `cdc-covid-geography` in in `parquet` format that {arrow}can handle. It is \> 600Mb and too large to be hosted on Canvas or Github, so please download it from dropbox <https://www.dropbox.com/sh/q1yk8mmnbbrzavl/AAAxzRtIhag9Nc_hODafGV2ka?dl=0> and save it in your `dsb` repo, under the `data` folder
 
 ```{r}
 #| echo: false
@@ -124,6 +277,7 @@ toc() # stop timer
 
 glimpse(cdc_data)
 ```
+
 Can you query the database and replicate the following plot?
 
 ```{r echo=FALSE, out.width="100%"}
@@ -132,49 +286,43 @@ knitr::include_graphics(here::here("images", "covid-CFR-ICU.png"), error = FALSE
 
 The previous plot is an aggregate plot for all three years of data. What if we wanted to plot Case Fatality Ratio (CFR) over time? Write code that collects the relevant data from the database and plots the following
 
-
 ```{r echo=FALSE, out.width="100%"}
 knitr::include_graphics(here::here("images", "cfr-icu-overtime.png"), error = FALSE)
 ```
 
-
 For each patient, the dataframe also lists the patient's states and county [FIPS code](https://en.wikipedia.org/wiki/Federal_Information_Processing_Standard_state_code). The CDC also has information on the [NCHS Urban-Rural classification scheme for counties](https://www.cdc.gov/nchs/data_access/urban_rural.htm)
+
 ```{r}
 urban_rural <- read_xlsx(here::here("data", "NCHSURCodes2013.xlsx")) %>% 
   janitor::clean_names() 
 ```
 
-
 Each county belongs in seix diffent categoreis, with categories 1-4 being urban areas and categories 5-6 being rural, according to the following criteria captured in `x2013_code`
 
 Category name
 
-1. Large central metro - 1 million or more population and contains the entire population of the largest principal city
-2. large fringe metro - 1 million or more poulation, but does not qualify as 1
-3. Medium metro - 250K - 1 million population
-4. Small metropolitan population < 250K
-5. Micropolitan 
-6. Noncore
+1.  Large central metro - 1 million or more population and contains the entire population of the largest principal city
+2.  large fringe metro - 1 million or more poulation, but does not qualify as 1
+3.  Medium metro - 250K - 1 million population
+4.  Small metropolitan population \< 250K
+5.  Micropolitan
+6.  Noncore
 
 Can you query the database, extract the relevant information, and reproduce the following two graphs that look at the Case Fatality ratio (CFR) in different counties, according to their population?
-
 
 ```{r echo=FALSE, out.width="100%"}
 knitr::include_graphics(here::here("images", "cfr-county-population.png"), error = FALSE)
 ```
 
-
-
 ```{r echo=FALSE, out.width="100%"}
 knitr::include_graphics(here::here("images", "cfr-rural-urban.png"), error = FALSE)
 ```
-
 
 # Money in US politics
 
 In the United States, [*"only American citizens (and immigrants with green cards) can contribute to federal politics, but the American divisions of foreign companies can form political action committees (PACs) and collect contributions from their American employees."*](https://www.opensecrets.org/political-action-committees-pacs/foreign-connected-pacs)
 
-We will scrape and work with data foreign connected PACs that donate to US political campaigns. The data for foreign connected PAC contributions in the 2022 election cycle can be found at https://www.opensecrets.org/political-action-committees-pacs/foreign-connected-pacs/2022. Then, we will use a similar approach to get data such contributions from previous years so that we can examine trends over time.
+We will scrape and work with data foreign connected PACs that donate to US political campaigns. The data for foreign connected PAC contributions in the 2022 election cycle can be found at <https://www.opensecrets.org/political-action-committees-pacs/foreign-connected-pacs/2022>. Then, we will use a similar approach to get data such contributions from previous years so that we can examine trends over time.
 
 All data come from [OpenSecrets.org](https://www.opensecrets.org), a *"website tracking the influence of money on U.S. politics, and how that money affects policy and citizens' lives"*.
 
@@ -193,9 +341,9 @@ contributions_tables <- base_url %>%
 
 ```
 
-- First, make sure you can scrape the data for 2022. Use janitor::clean_names() to rename variables scraped using `snake_case` naming. 
+-   First, make sure you can scrape the data for 2022. Use janitor::clean_names() to rename variables scraped using `snake_case` naming.
 
-- Clean the data: 
+-   Clean the data:
 
     -   Write a function that converts contribution amounts in `total`, `dems`, and `repubs` from character strings to numeric values.
     -   Separate the `country_of_origin_parent_company` into two such that country and parent company appear in different columns for country-level analysis.
@@ -228,9 +376,6 @@ contributions <- contributions %>%
   )
 ```
 
-
-
-
 -   Write a function called `scrape_pac()` that scrapes information from the Open Secrets webpage for foreign-connected PAC contributions in a given year. This function should
 
     -   have one input: the URL of the webpage and should return a data frame.
@@ -243,7 +388,6 @@ contributions <- contributions %>%
 -   Map the `scrape_pac()` function over `urls` in a way that will result in a data frame called `contributions_all`.
 
 -   Write the data frame to a csv file called `contributions-all.csv` in the `data` folder.
-
 
 # Scraping consulting jobs
 
@@ -265,48 +409,41 @@ listings_html <- base_url %>%
 
 Identify the CSS selectors in order to extract the relevant information from this page, namely
 
-1. job 
-1. firm
-1. functional area
-1. type
+1.  job
+2.  firm
+3.  functional area
+4.  type
 
 Can you get all pages of ads, and not just the first one, `https://www.consultancy.uk/jobs/page/1` into a dataframe?
-
 
 -   Write a function called `scrape_jobs()` that scrapes information from the webpage for consulting positions. This function should
 
     -   have one input: the URL of the webpage and should return a data frame with four columns (variables): job, firm, functional area, and type
 
-    -   Test your function works with other pages too, e.g., https://www.consultancy.uk/jobs/page/2. Does the function seem to do what you expected it to do?
+    -   Test your function works with other pages too, e.g., <https://www.consultancy.uk/jobs/page/2>. Does the function seem to do what you expected it to do?
 
     -   Given that you have to scrape `...jobs/page/1`, `...jobs/page/2`, etc., define your URL so you can join multiple stings into one string, using `str_c()`. For instnace, if `page` is 5, what do you expect the following code to produce?
-    
-```
+
+```         
 base_url <- "https://www.consultancy.uk/jobs/page/1"
 url <- str_c(base_url, page)
 ```
 
 -   Construct a vector called `pages` that contains the numbers for each page available
 
-
 -   Map the `scrape_jobs()` function over `pages` in a way that will result in a data frame called `all_consulting_jobs`.
 
 -   Write the data frame to a csv file called `all_consulting_jobs.csv` in the `data` folder.
 
-
-
 # Create a shiny app - OPTIONAL
 
-We have already worked with the data on electricity production and usage, GDP/capita and CO2/capita since 1990.
-You have to create a simple Shiny app, where a user chooses a country from a drop down list and a time interval between 1990 and 2020 and shiny outputs the following
+We have already worked with the data on electricity production and usage, GDP/capita and CO2/capita since 1990. You have to create a simple Shiny app, where a user chooses a country from a drop down list and a time interval between 1990 and 2020 and shiny outputs the following
 
 ```{r echo=FALSE, out.width="100%"}
 knitr::include_graphics(here::here("images", "electricity-shiny.png"), error = FALSE)
 ```
 
 You can use chatGPT to get the basic layout of Shiny app, but you need to adjust the code it gives you. Ask chatGPT to create the Shiny app using the `gapminder` data and make up similar requests for the inputs/outpus you are thinking of deploying.
-
-
 
 # Deliverables
 
