@@ -199,6 +199,12 @@ I would like you to write code that generates the following table
 ```{r echo=FALSE, out.width="80%"}
 knitr::include_graphics(here::here("images", "total_donations_table.png"), error = FALSE)
 
+# First creating tables as databse objects
+
+parties_db <- dplyr::tbl(sky_westminster, "parties")
+
+# Now gathering the necessary data
+
 yearly_payments <-
   
   payments_db %>% 
