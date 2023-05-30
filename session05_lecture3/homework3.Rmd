@@ -288,22 +288,131 @@ Can you query the database and replicate the following plot?
 
 ```{r echo=FALSE, out.width="100%"}
 knitr::include_graphics(here::here("images", "covid-CFR-ICU.png"), error = FALSE)
+
+# Let's give it a go by creating the necessary data frame first
+
+cdc_data %>% 
+  
+  # Making sure we only count certain ICU admissions/non-admissions
+  filter(icu_yn %in% c("Yes", "No")) %>% 
+  
+  # Making sure we only count certain deaths/non-deaths
+  filter(death_yn %in% c("Yes", "No")) %>% 
+  
+  # Making sure we only count certain males/females
+  filter(sex == "Male" | sex == "Female") %>% 
+  
+  # Removing rows without age_group variable  
+  filter(age_group != "Missing") %>% 
+  
+  # Renaming for clarity
+  mutate(icu_yn = case_when(
+    icu_yn == "Yes" ~ "ICU Admission",
+    TRUE ~ "No ICU Admission"
+  )) %>%
+  
+  # Wanted to change death_yn column to a binary numerical value, so I can use sum() in the summarise without needing to filter
+  mutate(death_yn = case_when(
+    death_yn == "Yes" ~ "1", # Note here that 1 = Death 
+    TRUE ~ "0"
+  )) %>% 
+  
+  # Grouping by the categories given in the example plot    
+  group_by(age_group, sex, icu_yn) %>% 
+  
+  # Calculating our inputs
+  summarise(total_deaths = sum(as.numeric(death_yn)), total_cases = n()) %>%
+  
+  # Calculating our variable of interest  
+  mutate(cfr = total_deaths/total_cases) %>% 
+
+  # Collecting as data frame 
+  collect() %>% 
+  
+  # And plotting
+  ggplot(aes(x = cfr, y = age_group)) +
+  geom_col(fill = "#ff8e7c") +
+  
+  # Faceting in grid format
+  facet_grid(rows = vars(icu_yn), cols = vars(sex)) +
+  
+  # Now aesthetics
+  geom_text(aes(label = round(cfr*100, 0), hjust = 1), size = 3) +
+  labs(title = "Covid CFR % by age group, sex, and ICU Admission", caption = "Source: CDC", x = NULL, y = NULL) +
+  theme_light() +
+  scale_x_continuous(labels = percent_format())
+
 ```
 
 The previous plot is an aggregate plot for all three years of data. What if we wanted to plot Case Fatality Ratio (CFR) over time? Write code that collects the relevant data from the database and plots the following
 
 ```{r echo=FALSE, out.width="100%"}
 knitr::include_graphics(here::here("images", "cfr-icu-overtime.png"), error = FALSE)
+
+cdc_data %>% 
+  
+  # Making sure we only count certain ICU admissions/non-admissions
+  filter(icu_yn %in% c("Yes", "No")) %>% 
+  
+  # Making sure we only count certain deaths/non-deaths
+  filter(death_yn %in% c("Yes", "No")) %>% 
+  
+  # Making sure we only count certain males/females
+  filter(sex == "Male" | sex == "Female") %>% 
+  
+  # Removing rows without age_group variable  
+  filter(age_group != "Missing") %>% 
+  
+  # Renaming for clarity
+  mutate(icu_yn = case_when(
+    icu_yn == "Yes" ~ "ICU Admission",
+    TRUE ~ "No ICU Admission"
+  )) %>%
+  
+  # Wanted to change death_yn column to a binary numerical value, so I can use sum() in the summarise without needing to filter
+  mutate(death_yn = case_when(
+    death_yn == "Yes" ~ "1", # Note here that 1 = Death 
+    TRUE ~ "0"
+  )) %>% 
+  
+  # Grouping by the categories given in the example plot    
+  group_by(case_month, age_group, sex, icu_yn) %>% 
+  
+  # Calculating our inputs
+  summarise(total_deaths = sum(as.numeric(death_yn)), total_cases = n()) %>%
+  
+  # Calculating our variable of interest  
+  mutate(cfr = total_deaths/total_cases) %>% 
+
+  # Collecting as data frame 
+  collect() %>% 
+  
+    # And plotting
+  ggplot(aes(x = case_month, y = cfr)) +
+  geom_line(aes(group = age_group, color = age_group)) +
+  
+  # Faceting in grid format
+  facet_grid(rows = vars(icu_yn), cols = vars(sex)) +
+
+  # Now aesthetics
+  geom_text(aes(label = round(cfr*100, 0), hjust = 1, color = age_group), size = 3) +
+  labs(title = "Covid CFR % by age group, sex, and ICU Admission", caption = "Source: CDC", x = NULL, y = NULL) +
+  theme_light() +
+  scale_y_continuous(labels = percent_format()) +
+  theme(panel.grid = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 4))  +
+  NULL
+
 ```
 
 For each patient, the dataframe also lists the patient's states and county [FIPS code](https://en.wikipedia.org/wiki/Federal_Information_Processing_Standard_state_code). The CDC also has information on the [NCHS Urban-Rural classification scheme for counties](https://www.cdc.gov/nchs/data_access/urban_rural.htm)
 
 ```{r}
 urban_rural <- read_xlsx(here::here("data", "NCHSURCodes2013.xlsx")) %>% 
-  janitor::clean_names() 
+  janitor::clean_names()
 ```
 
-Each county belongs in seix diffent categoreis, with categories 1-4 being urban areas and categories 5-6 being rural, according to the following criteria captured in `x2013_code`
+Each county belongs in six diffent categoreis, with categories 1-4 being urban areas and categories 5-6 being rural, according to the following criteria captured in `x2013_code`
 
 Category name
 
@@ -318,10 +427,154 @@ Can you query the database, extract the relevant information, and reproduce the 
 
 ```{r echo=FALSE, out.width="100%"}
 knitr::include_graphics(here::here("images", "cfr-county-population.png"), error = FALSE)
+
+cdc_data %>% 
+  
+  # Making sure we only count certain ICU admissions/non-admissions
+  filter(icu_yn %in% c("Yes", "No")) %>% 
+  
+  # Making sure we only count certain deaths/non-deaths
+  filter(death_yn %in% c("Yes", "No")) %>% 
+  
+  # Making sure we only count certain males/females
+  filter(sex == "Male" | sex == "Female") %>% 
+  
+  # Removing rows without age_group variable  
+  filter(age_group != "Missing") %>% 
+  
+  # Renaming for clarity
+  mutate(icu_yn = case_when(
+    icu_yn == "Yes" ~ "ICU Admission",
+    TRUE ~ "No ICU Admission"
+  )) %>%
+  
+  # Wanted to change death_yn column to a binary numerical value, so I can use sum() in the summarise without needing to filter
+  mutate(death_yn = case_when(
+    death_yn == "Yes" ~ "1", # Note here that 1 = Death 
+    TRUE ~ "0"
+  )) %>% 
+  
+  # Now let's join the urban_rural table
+  mutate(county_fips_code = as.double(county_fips_code)) %>% 
+  left_join(urban_rural, by = c("county_fips_code" = "fips_code")) %>% 
+
+  
+  # Grouping by the categories given in the example plot    
+  group_by(case_month, x2013_code) %>% 
+  
+  # Calculating our inputs
+  summarise(total_deaths = sum(as.numeric(death_yn)), total_cases = n()) %>%
+  
+  # Calculating our variable of interest  
+  mutate(cfr = total_deaths/total_cases) %>%
+
+  # Collecting as data frame 
+  collect() %>% 
+  
+  # Let's remove NAs
+  filter(x2013_code != "NA") %>%
+  filter(case_month != "2020-02") %>% 
+  
+  # And rename x2013_code names
+  mutate(x2013_code = case_when(
+    x2013_code == 1 ~ "Large central metro",
+    x2013_code == 2 ~ "Large fringe metro",
+    x2013_code == 3 ~ "Medium metro",
+    x2013_code == 4 ~ "Small metro population",
+    x2013_code == 5 ~ "Micropolitan",
+    x2013_code == 6 ~ "Noncore"
+  )) %>% 
+  
+  # And plotting
+  ggplot(aes(x = case_month, y = cfr)) +
+  geom_line(aes(group = x2013_code, color = x2013_code)) +
+  
+  # Faceting in grid format
+  facet_wrap(~ x2013_code, nrow = 3, scales = "free") +
+
+  # Now aesthetics
+  geom_text(aes(label = round(cfr*100, 0), hjust = 1, color = x2013_code), size = 3) +
+  labs(title = "Covid CFR % by county population", caption = "Source: CDC", x = NULL, y = NULL, color = NULL) +
+  theme_light() +
+  scale_y_continuous(labels = percent_format()) +
+  theme(panel.grid = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 4))  +
+  NULL
+
 ```
 
 ```{r echo=FALSE, out.width="100%"}
 knitr::include_graphics(here::here("images", "cfr-rural-urban.png"), error = FALSE)
+
+cdc_data %>% 
+  
+  # Making sure we only count certain ICU admissions/non-admissions
+  filter(icu_yn %in% c("Yes", "No")) %>% 
+  
+  # Making sure we only count certain deaths/non-deaths
+  filter(death_yn %in% c("Yes", "No")) %>% 
+  
+  # Making sure we only count certain males/females
+  filter(sex == "Male" | sex == "Female") %>% 
+  
+  # Removing rows without age_group variable  
+  filter(age_group != "Missing") %>% 
+  
+  # Renaming for clarity
+  mutate(icu_yn = case_when(
+    icu_yn == "Yes" ~ "ICU Admission",
+    TRUE ~ "No ICU Admission"
+  )) %>%
+  
+  # Wanted to change death_yn column to a binary numerical value, so I can use sum() in the summarise without needing to filter
+  mutate(death_yn = case_when(
+    death_yn == "Yes" ~ "1", # Note here that 1 = Death 
+    TRUE ~ "0"
+  )) %>% 
+  
+  # Now let's join the urban_rural table
+  mutate(county_fips_code = as.double(county_fips_code)) %>% 
+  left_join(urban_rural, by = c("county_fips_code" = "fips_code")) %>% 
+  
+  # And rename x2013_code names
+  mutate(x2013_code = case_when(
+    x2013_code == 1 ~ "Urban",
+    x2013_code == 2 ~ "Urban",
+    x2013_code == 3 ~ "Urban",
+    x2013_code == 4 ~ "Rural",
+    x2013_code == 5 ~ "Rural",
+    x2013_code == 6 ~ "Rural"
+  )) %>% 
+  
+  # Grouping by the categories given in the example plot    
+  group_by(case_month, x2013_code) %>% 
+  
+  # Calculating our inputs
+  summarise(total_deaths = sum(as.numeric(death_yn)), total_cases = n()) %>%
+  
+  # Calculating our variable of interest  
+  mutate(cfr = total_deaths/total_cases) %>%
+
+  # Collecting as data frame 
+  collect() %>% 
+  
+  # Let's remove NAs
+  filter(x2013_code != "NA") %>%
+  filter(case_month != "2020-02") %>% 
+  
+  # And plotting
+  ggplot(aes(x = case_month, y = cfr)) +
+  geom_line(aes(group = x2013_code, color = x2013_code)) +
+
+  # Now aesthetics
+  geom_text(aes(label = round(cfr*100,2), hjust = 1), color = "black",  size = 3) +
+  labs(title = "Covid CFR % by rural and ubran areas", caption = "Source: CDC", x = NULL, y = NULL, color = NULL) +
+  theme_light() +
+  scale_y_continuous(labels = percent_format()) +
+  theme(panel.grid = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 4))  +
+  NULL
+
 ```
 
 # Money in US politics
@@ -337,14 +590,15 @@ All data come from [OpenSecrets.org](https://www.opensecrets.org), a *"website t
 #| warning: false
 #| message: false
 
+library(rvest)
 library(robotstxt)
 paths_allowed("https://www.opensecrets.org")
 
 base_url <- "https://www.opensecrets.org/political-action-committees-pacs/foreign-connected-pacs/2022"
 
-contributions_tables <- base_url %>%
-  read_html() 
-
+contributions_tables <- base_url %>% 
+  read_html()
+  
 ```
 
 -   First, make sure you can scrape the data for 2022. Use janitor::clean_names() to rename variables scraped using `snake_case` naming.
@@ -355,7 +609,24 @@ contributions_tables <- base_url %>%
     -   Separate the `country_of_origin_parent_company` into two such that country and parent company appear in different columns for country-level analysis.
 
 ```{r, eval=FALSE}
-# write a function to parse_currency
+
+
+# Scraping the table for all of its information
+contributions <- data.frame(
+  
+  contributions_tables %>%
+                              
+  # Using inspect_element to find the correct selector
+  html_elements("#main > div.Main-wrap.l-padding.u-mt2 > div > div > div.l-primary > div:nth-child(1) > div > div:nth-child(5)") %>%
+  html_table()
+    ) %>% 
+  
+  # Cleaning names of our data frame
+  janitor::clean_names()
+
+
+
+# Write a function to parse_currency
 parse_currency <- function(x){
   x %>%
     
@@ -369,17 +640,28 @@ parse_currency <- function(x){
     as.numeric()
 }
 
-# clean country/parent co and contributions 
+
+
+# Applying function to contributions
+
+contributions <- contributions %>% 
+  
+  # Using the function within a mutate of our existing data frame
+  mutate(total = parse_currency(total),
+         dems = parse_currency(dems),
+         repubs = parse_currency(repubs))
+
+
+
+# Clean country/parent co and contributions 
 contributions <- contributions %>%
   separate(country_of_origin_parent_company, 
            into = c("country", "parent"), 
            sep = "/", 
-           extra = "merge") %>%
-  mutate(
-    total = parse_currency(total),
-    dems = parse_currency(dems),
-    repubs = parse_currency(repubs)
-  )
+           extra = "merge")
+
+glimpse(contributions)
+
 ```
 
 -   Write a function called `scrape_pac()` that scrapes information from the Open Secrets webpage for foreign-connected PAC contributions in a given year. This function should
@@ -394,6 +676,65 @@ contributions <- contributions %>%
 -   Map the `scrape_pac()` function over `urls` in a way that will result in a data frame called `contributions_all`.
 
 -   Write the data frame to a csv file called `contributions-all.csv` in the `data` folder.
+
+```{r}
+
+scrape_pac <- function(url) {
+
+  # Process 1
+  contributions_tables <- url %>% 
+    read_html()
+  
+  # Process 2
+  contributions <- data.frame(
+  
+  contributions_tables %>%
+                              
+  html_elements("#main > div.Main-wrap.l-padding.u-mt2 > div > div > div.l-primary > div:nth-child(1) > div > div:nth-child(5)") %>%
+  html_table()
+    ) %>% 
+  
+  janitor::clean_names()
+  
+  # Process 3 & 4
+  contributions <- contributions %>% 
+      separate(country_of_origin_parent_company, 
+           into = c("country", "parent"), 
+           sep = "/", 
+           extra = "merge") %>% 
+  
+      mutate(total = parse_currency(total),
+             dems = parse_currency(dems),
+             repubs = parse_currency(repubs))
+  
+  contributions <- contributions %>% 
+    mutate(year = str_sub(url, -4))
+  
+  glimpse(contributions)
+  
+  }
+
+# Defining urls for 2000, 2020 and 2022
+url_2022 <- "https://www.opensecrets.org/political-action-committees-pacs/foreign-connected-pacs/2022"
+
+url_2020 <-"https://www.opensecrets.org/political-action-committees-pacs/foreign-connected-pacs/2020"
+
+url_2000 <-"https://www.opensecrets.org/political-action-committees-pacs/foreign-connected-pacs/2000"
+
+# Creating a vector
+os_urls <- c(url_2000, url_2020, url_2022)
+
+# Running function over os_urls
+contributions_all <- map_df(os_urls, scrape_pac)
+
+# Accuracy check
+contributions_all %>% 
+  group_by(year) %>% 
+  count() # Looks good
+
+write.csv(contributions_all, file.path("~/Library/CloudStorage/OneDrive-LondonBusinessSchool/Electives/E628 Data Science/dsb2023_mcheatle/data", "contributions-all.csv"))
+
+```
 
 # Scraping consulting jobs
 
