@@ -1,0 +1,720 @@
+---
+title: "Homework 4: Machine Learning"
+author: "Max Cheatle"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: flatly
+    highlight: zenburn
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+    code_folding: show
+  pdf_document:
+    toc: yes
+---
+
+```{r}
+#| label: load-libraries
+#| echo: false # This option disables the printing of code (only output is displayed).
+#| message: false
+#| warning: false
+options(scipen = 999) #disable scientific notation
+library(tidyverse)
+library(tidymodels)
+library(GGally)
+library(sf)
+library(leaflet)
+library(janitor)
+library(rpart.plot)
+library(here)
+library(scales)
+library(vip)
+library(parsnip)
+library(yardstick)
+library(C50)
+library(kknn)
+
+```
+
+# The Bechdel Test
+
+```{r read_data}
+
+bechdel <- read_csv(here::here("data", "bechdel.csv")) %>% 
+  mutate(test = factor(test)) 
+glimpse(bechdel)
+
+```
+
+How many films fail/pass the test, both as a number and as a %?
+
+```{r}
+
+pass_fail <- bechdel %>% 
+  
+  # Grouping by test result and counting
+  group_by(test) %>% 
+  summarise(count = n()) %>% 
+  
+  # Now summing the count to use as denomitor, to find percentage
+  mutate(pct = round(count/sum(count)*100,2))
+
+# Showing result
+pass_fail
+
+```
+
+## Movie scores
+
+```{r}
+ggplot(data = bechdel, aes(
+  x = metascore,
+  y = imdb_rating,
+  colour = test
+)) +
+  geom_point(alpha = .3, size = 3) +
+  scale_colour_manual(values = c("tomato", "olivedrab")) +
+  labs(
+    x = "Metacritic score",
+    y = "IMDB rating",
+    colour = "Bechdel test"
+  ) +
+ theme_light()
+```
+
+# Split the data
+
+```{r}
+# **Split the data**
+
+set.seed(123)
+
+data_split <- initial_split(bechdel, # updated data
+                           prop = 0.8, 
+                           strata = test)
+
+bechdel_train <- training(data_split) 
+bechdel_test <- testing(data_split)
+```
+
+Check the counts and % (proportions) of the `test` variable in each set.
+
+```{r}
+
+# First for the training set
+
+pass_fail_train <- bechdel_train %>% 
+  
+  # Grouping by test result and counting
+  group_by(test) %>% 
+  summarise(count = n()) %>% 
+  
+  # Now summing the count to use as denomitor, to find percentage
+  mutate(pct = round(count/sum(count)*100,2))
+
+# Showing result
+pass_fail_train
+
+
+
+# Now for the test set
+
+# Grouping by test result and counting
+pass_fail_test <- bechdel_test %>% 
+
+  # Grouping by test result and counting
+  group_by(test) %>% 
+  summarise(count = n()) %>% 
+  
+  # Now summing the count to use as denomitor, to find percentage
+  mutate(pct = round(count/sum(count)*100,2))
+
+# Showing result
+pass_fail_test
+```
+
+## Feature exploration
+
+## Any outliers?
+
+```{r}
+
+bechdel %>% 
+  select(test, budget_2013, domgross_2013, intgross_2013, imdb_rating, metascore) %>% 
+
+    pivot_longer(cols = 2:6,
+               names_to = "feature",
+               values_to = "value") %>% 
+  ggplot()+
+  aes(x=test, y = value, fill = test)+
+  coord_flip()+
+  geom_boxplot()+
+  facet_wrap(~feature, scales = "free")+
+  theme_bw()+
+  theme(legend.position = "none")+
+  labs(x=NULL,y = NULL)
+
+```
+
+## Scatterplot - Correlation Matrix
+
+Write a paragraph discussing the output of the following
+
+```{r, warning=FALSE, message=FALSE}
+bechdel %>% 
+  select(test, budget_2013, domgross_2013, intgross_2013, imdb_rating, metascore)%>% 
+  ggpairs(aes(colour=test), alpha=0.2)+
+  theme_bw()
+```
+
+The above plot tells us the distribution and correlation of the following variables for movies that failed and passed the test:
+
+-   budget_2013
+
+    -   The distribution is highly positively skewed, meaning it has a low peak relative to its long right tail, with a very marginal difference for pass/fail movies
+
+    -   It is positively correlated to domgross_2013 and intgross_2013, both of which are stronger for the 'pass' category
+
+    -   There is no/very weak correlation with imdb_rating and metascore
+
+-   domgross_2013
+
+    -   The distribution is identical for pass/fail movies, with a highly positive skew
+
+    -   Has a near perfect positive correlation with intgross_2013, though slightly higher for movies that passed
+
+    -   Both pass and fail have slightly positive correlation with imdb_rating and metascore, though movies in the fail category are slightly stronger for both
+
+-   intgross_2013
+
+    -   The distribution is identical for pass/fail movies, with a highly positive skew
+
+    -   Both pass and fail have slightly positive correlation with imdb_rating and metascore, though movies in the fail category are slightly stronger for both
+
+-   imdb_rating
+
+    -   Has a relatively normal distribution, weighted towards a negative skew
+
+    -   Has strong positive correlation with metascore, with no clear difference between pass/fail movies
+
+-   metascore
+
+    -   Has a relatively normal distribution, with no clear skew
+
+## Categorical variables
+
+Write a paragraph discussing the output of the following
+
+```{r}
+bechdel %>% 
+  group_by(genre, test) %>%
+  summarise(n = n()) %>% 
+  mutate(prop = n/sum(n)) %>% 
+  
+  # Arranging the data for easier analysis
+  arrange(test, -prop)
+  
+ 
+bechdel %>% 
+  group_by(rated, test) %>%
+  summarise(n = n()) %>% 
+  mutate(prop = n/sum(n)) %>% 
+  
+  # Arranging the data for easier analysis
+  arrange(test, -prop)
+```
+
+The above dataframes show us the pass and fail rate, for movies based on their i) genre, and ii) rating.
+
+#### Genre
+
+Focusing on the genres with sufficiently large sample sizes (above 20), action has the highest failure rate, at 70%. Animation is close behind, at 67%, and crime fails 62% of the time. Adventure, biography, and drama movies, fail at 55%, 55%, and 47% respectively. Comedy and horror films have the lowest failure rates at 42% and 33% respectively.
+
+#### Rating
+
+Failure rates across genres vary between 83% and 52%. NC-17 films fail at 83%, but the sample size is small with only 6 total movies with that rating. G rates films fail at a 62% rate, and R and PG rates films fail at a 56% rate. PG-13 films fail at the lowest rate, of 52%.
+
+# Train first models. `test ~ metascore + imdb_rating`
+
+```{r}
+lr_mod <- logistic_reg() %>% 
+  set_engine(engine = "glm") %>% 
+  set_mode("classification")
+
+lr_mod
+
+
+tree_mod <- decision_tree() %>% 
+  set_engine(engine = "C5.0") %>% 
+  set_mode("classification")
+
+tree_mod 
+```
+
+```{r}
+
+
+lr_fit <- lr_mod %>% # parsnip model
+  fit(test ~ metascore + imdb_rating, # a formula
+    data = bechdel_train # dataframe
+  )
+
+tree_fit <- tree_mod %>% # parsnip model
+  fit(test ~ metascore + imdb_rating, # a formula
+    data = bechdel_train # dataframe
+  )
+```
+
+## Logistic regression
+
+```{r}
+lr_fit %>%
+  broom::tidy()
+
+lr_preds <- lr_fit %>%
+  augment(new_data = bechdel_train) %>%
+  mutate(.pred_match = if_else(test == .pred_class, 1, 0))
+
+```
+
+### Confusion matrix
+
+```{r}
+lr_preds %>% 
+  conf_mat(truth = test, estimate = .pred_class) %>% 
+  autoplot(type = "heatmap")
+
+```
+
+Plotting the confusion matrix shows that this model is only 58% accurate (prediction = true), and therefore is not reliable.
+
+## Decision Tree
+
+```{r}
+tree_preds <- tree_fit %>%
+  augment(new_data = bechdel) %>%
+  mutate(.pred_match = if_else(test == .pred_class, 1, 0)) 
+
+
+```
+
+```{r}
+tree_preds %>% 
+  conf_mat(truth = test, estimate = .pred_class) %>% 
+  autoplot(type = "heatmap")
+```
+
+Plotting the confusion matrix shows that this model is also only 58% accurate (prediction = true), and therefore is not reliable.
+
+## Draw the decision tree
+
+```{r}
+draw_tree <- 
+    rpart::rpart(
+        test ~ metascore + imdb_rating,
+        data = bechdel_train, # uses data that contains both birth weight and `low`
+        control = rpart::rpart.control(maxdepth = 5, cp = 0, minsplit = 10)
+    ) %>% 
+    partykit::as.party()
+plot(draw_tree)
+
+```
+
+# Cross Validation
+
+Run the code below. What does it return?
+
+```{r}
+set.seed(123)
+bechdel_folds <- vfold_cv(data = bechdel_train, 
+                          v = 10, 
+                          strata = test)
+bechdel_folds
+```
+
+This code is used to split the bechdel_train dataset into 10 separate folds for cross-validation. That is used to assess how well a model performs on test (not used for model training) data. In this case, the code performs a stratified cross-validation, which means that each fold has similar distributions of the test results.
+
+## `fit_resamples()`
+
+Trains and tests a resampled model.
+
+```{r}
+lr_fit <- lr_mod %>%
+  fit_resamples(
+    test ~ metascore + imdb_rating,
+    resamples = bechdel_folds
+  )
+
+
+tree_fit <- tree_mod %>%
+  fit_resamples(
+    test ~ metascore + imdb_rating,
+    resamples = bechdel_folds
+  )
+```
+
+## `collect_metrics()`
+
+Unnest the metrics column from a tidymodels `fit_resamples()`
+
+```{r}
+
+collect_metrics(lr_fit)
+collect_metrics(tree_fit)
+
+
+```
+
+```{r}
+tree_preds <- tree_mod %>% 
+  fit_resamples(
+    test ~ metascore + imdb_rating, 
+    resamples = bechdel_folds,
+    control = control_resamples(save_pred = TRUE) #<<
+  )
+
+# What does the data for ROC look like?
+tree_preds %>% 
+  collect_predictions() %>% 
+  roc_curve(truth = test, .pred_Fail)  
+
+# Draw the ROC
+tree_preds %>% 
+  collect_predictions() %>% 
+  roc_curve(truth = test, .pred_Fail) %>% 
+  autoplot()
+
+```
+
+# Build a better training set with `recipes`
+
+```{r}
+#| echo = FALSE
+bechdel %>% 
+  count(genre) %>% 
+  mutate(genre = fct_reorder(genre, n)) %>% 
+  ggplot(aes(x = genre, 
+             y = n)) +
+  geom_col(alpha = .8) +
+  coord_flip() +
+  labs(x = NULL) +
+  geom_hline(yintercept = (nrow(bechdel_train)*.03), lty = 3)+
+  theme_light()
+```
+
+```{r}
+movie_rec <-
+  recipe(test ~ .,
+         data = bechdel_train) %>%
+  
+  # Genres with less than 5% will be in a catewgory 'Other'
+    step_other(genre, threshold = .03) 
+```
+
+## Before recipe
+
+```{r}
+#| echo = FALSE
+bechdel_train %>% 
+  count(genre, sort = TRUE)
+```
+
+## After recipe
+
+```{r}
+movie_rec %>% 
+  prep() %>% 
+  bake(new_data = bechdel_train) %>% 
+  count(genre, sort = TRUE)
+```
+
+## `step_dummy()`
+
+Converts nominal data into numeric dummy variables
+
+```{r}
+#| results = "hide"
+movie_rec <- recipe(test ~ ., data = bechdel) %>%
+  step_other(genre, threshold = .03) %>% 
+  step_dummy(all_nominal_predictors()) 
+
+movie_rec 
+```
+
+## Let's think about the modelling
+
+What if there were no films with `rated` NC-17 in the training data?
+
+-   Will the model have a coefficient for `rated` NC-17?
+    -   No, if there are no NC-17 rated movies in the training data, then the model will have a coefficient for any films in this rating.
+-   What will happen if the test data includes a film with `rated` NC-17?
+    -   If there are NC-17 rated films in the test data, the model will not be able to make a prediction for theses films. The model has no information on the relationship between NC-17 rated films and the test variable, and therefore is not capable of creating an accurate prediction.
+
+## `step_novel()`
+
+Adds a catch-all level to a factor for any new values not encountered in model training, which lets R intelligently predict new levels in the test set.
+
+```{r}
+
+movie_rec <- recipe(test ~ ., data = bechdel) %>%
+  step_other(genre, threshold = .03) %>% 
+  step_novel(all_nominal_predictors) %>% # Use *before* `step_dummy()` so new level is dummified
+  step_dummy(all_nominal_predictors()) 
+
+```
+
+## `step_zv()`
+
+Intelligently handles zero variance variables (variables that contain only a single value)
+
+```{r}
+movie_rec <- recipe(test ~ ., data = bechdel) %>%
+  step_other(genre, threshold = .03) %>% 
+  step_novel(all_nominal(), -all_outcomes()) %>% # Use *before* `step_dummy()` so new level is dummified
+  step_dummy(all_nominal(), -all_outcomes()) %>% 
+  step_zv(all_numeric(), -all_outcomes()) 
+  
+```
+
+## `step_normalize()`
+
+Centers then scales numeric variable (mean = 0, sd = 1)
+
+```{r}
+movie_rec <- recipe(test ~ ., data = bechdel) %>%
+  step_other(genre, threshold = .03) %>% 
+  step_novel(all_nominal(), -all_outcomes()) %>% # Use *before* `step_dummy()` so new level is dummified
+  step_dummy(all_nominal(), -all_outcomes()) %>% 
+  step_zv(all_numeric(), -all_outcomes())  %>% 
+  step_normalize(all_numeric()) 
+
+```
+
+## `step_corr()`
+
+Removes highly correlated variables
+
+```{r}
+movie_rec <- recipe(test ~ ., data = bechdel) %>%
+  step_other(genre, threshold = .03) %>% 
+  step_novel(all_nominal(), -all_outcomes()) %>% # Use *before* `step_dummy()` so new level is dummified
+  step_dummy(all_nominal(), -all_outcomes()) %>% 
+  step_zv(all_numeric(), -all_outcomes())  %>% 
+  step_normalize(all_numeric()) %>% 
+  step_corr(all_predictors(), threshold = 0.75, method = "spearman") 
+
+
+
+movie_rec
+```
+
+# Define different models to fit
+
+```{r}
+## Model Building
+
+# 1. Pick a `model type`
+# 2. set the `engine`
+# 3. Set the `mode`: regression or classification
+
+# Logistic regression
+log_spec <-  logistic_reg() %>%  # model type
+  set_engine(engine = "glm") %>%  # model engine
+  set_mode("classification") # model mode
+
+# Show your model specification
+log_spec
+
+# Decision Tree
+tree_spec <- decision_tree() %>%
+  set_engine(engine = "C5.0") %>%
+  set_mode("classification")
+
+tree_spec
+
+# Random Forest
+library(ranger)
+
+rf_spec <- 
+  rand_forest() %>% 
+  set_engine("ranger", importance = "impurity") %>% 
+  set_mode("classification")
+
+
+# Boosted tree (XGBoost)
+library(xgboost)
+
+xgb_spec <- 
+  boost_tree() %>% 
+  set_engine("xgboost") %>% 
+  set_mode("classification") 
+
+# K-nearest neighbour (k-NN)
+knn_spec <- 
+  nearest_neighbor(neighbors = 4) %>% # we can adjust the number of neighbors 
+  set_engine("kknn") %>% 
+  set_mode("classification") 
+```
+
+# Bundle recipe and model with `workflows`
+
+```{r}
+log_wflow <- # new workflow object
+ workflow() %>% # use workflow function
+ add_recipe(movie_rec) %>%   # use the new recipe
+ add_model(log_spec)   # add your model spec
+
+# show object
+log_wflow
+
+
+## A few more workflows
+
+tree_wflow <-
+ workflow() %>%
+ add_recipe(movie_rec) %>% 
+ add_model(tree_spec) 
+
+rf_wflow <-
+ workflow() %>%
+ add_recipe(movie_rec) %>% 
+ add_model(rf_spec) 
+
+xgb_wflow <-
+ workflow() %>%
+ add_recipe(movie_rec) %>% 
+ add_model(xgb_spec)
+
+knn_wflow <-
+ workflow() %>%
+ add_recipe(movie_rec) %>% 
+ add_model(knn_spec)
+
+```
+
+HEADS UP
+
+1.  How many models have you specified?
+
+5
+
+2.  What's the difference between a model specification and a workflow?
+
+A model specification defines the model structure and properties. This means that is specifies the type of model (e.g. linear regression, decision tree, etc.) and the respective parameters.
+
+A model workflow defines the end-to-end process of the model. That is, the data manipulation, training, and predictions.
+
+3.  Do you need to add a formula (e.g., `test ~ .`) if you have a recipe?
+
+No
+
+# Model Comparison
+
+You now have all your models. Adapt the code from slides `code-from-slides-CA-housing.R`, line 400 onwards to assess which model gives you the best classification.
+
+```{r}
+ 
+# Fitting the logistic regression model using the training data
+log_res <- log_wflow %>%
+  fit(data = bechdel_train)
+
+# Making the predictions on the test data
+log_pred <- log_res %>%
+  predict(new_data = bechdel_test) %>%
+  bind_cols(bechdel_test$test) %>%
+  
+  # Tidying column names for clarity
+  clean_names() %>%
+  rename(pred = pred_class, actual = x2)
+
+## View the predictions
+glimpse(log_pred)
+
+# Now repeating for the tree-based model
+
+tree_res <- tree_wflow %>%
+  fit(data = bechdel_train)
+
+tree_pred <- tree_res %>%
+  predict(new_data = bechdel_test) %>%
+  bind_cols(bechdel_test$test) %>%
+  clean_names() %>%
+  rename(pred = pred_class, actual = x2)
+
+# Now repeating for the random forest model
+rf_res <- rf_wflow %>%
+  fit(data = bechdel_train)
+
+rf_pred <- rf_res %>%
+  predict(new_data = bechdel_test) %>%
+  bind_cols(bechdel_test$test) %>%
+  clean_names() %>%
+  rename(pred = pred_class, actual = x2)
+
+# Now repeating for the XGBoost model
+xgb_res <- xgb_wflow %>%
+  fit(data = bechdel_train)
+
+xgb_pred <- xgb_res %>%
+  predict(new_data = bechdel_test) %>%
+  bind_cols(bechdel_test$test) %>%
+  clean_names() %>%
+  rename(pred = pred_class, actual = x2)
+
+# Now repeating for the k-nearest neighbors model
+knn_res <- knn_wflow %>%
+  fit(data = bechdel_train)
+
+knn_pred <- knn_res %>%
+  predict(new_data = bechdel_test) %>%
+  bind_cols(bechdel_test$test) %>%
+  clean_names() %>%
+  rename(pred = pred_class, actual = x2)
+
+# Combining all the prediction results into a single table
+all_preds <- bind_rows(
+  log_pred %>% mutate(model = "Logistic Regression"),
+  tree_pred %>% mutate(model = "Tree-based Model"),
+  rf_pred %>% mutate(model = "Random Forest"),
+  xgb_pred %>% mutate(model = "XGBoost"),
+  knn_pred %>% mutate(model = "KNN")
+)
+
+# Calculating counts for each combination of actual and predicted values
+count_data <- all_preds %>%
+  group_by(model, actual, pred) %>%
+  summarise(count = n())
+
+# Converting 'pred' variable to factor for plot
+count_data$pred <- factor(count_data$pred)
+
+# Creating confusion matrix by model type
+confusion_matrix_plot <- ggplot(count_data, aes(x = actual, y = pred, fill = pred)) +
+  geom_tile(color = "black") +
+  geom_text(aes(label = count), color = "black", size = 8) +
+  facet_wrap(~ model, scales = "free") +
+  scale_fill_manual(values = c("lightgrey", "darkgrey")) +
+  
+  # Aesthetics
+  labs(title = "Confusion Matrix by Model Type", x = "Actual", y = "Predicted") +
+  theme_minimal() 
+
+# View the combined predictions and the confusion matrix plot
+print(all_preds)
+print(count_data)
+print(confusion_matrix_plot)
+
+```
+
+The Logistic Regression and Random Forest models exhibit similar performance, with the Logistic Regression model correctly predicting the "Fail" category 50 times and the "Pass" category 71 times, while the Random Forest model accurately predicts the "Fail" category 118 times and the "Pass" category 46 times. Both models show higher accuracy in predicting the "Fail" category compared to the "Pass" category, although the Logistic Regression model demonstrates a more balanced accuracy across both categories.
+
+The Tree-based Model and XGBoost demonstrate comparable accuracy, with the Tree-based Model accurately predicting the "Fail" category 116 times and the "Pass" category 49 times, and XGBoost correctly predicting the "Fail" category 106 times and the "Pass" category 56 times. These models showcase a relatively balanced performance in predicting both categories.
+
+In contrast, the KNN model has a higher accuracy in identifying films that fail the Bechdel test, with 155 correct predictions, but a lower accuracy in predicting films that pass the test, with 125 correct predictions.
+
+# Details
+
+-   Who did you collaborate with: NA
+-   Approximately how much time did you spend on this problem set: 4hrs
+-   What, if anything, gave you the most trouble: Model comparison was difficult, had to consult ChatGPT

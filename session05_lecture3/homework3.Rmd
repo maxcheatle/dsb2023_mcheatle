@@ -1,8 +1,12 @@
 ---
-title: "Homework 3: Databases, web scraping, and a basic Shiny app"
+title: 'Homework 3: Databases, web scraping, and a basic Shiny app'
 author: "Max Cheatle"
 date: "`r Sys.Date()`"
 output:
+  word_document:
+    toc: yes
+  pdf_document:
+    toc: yes
   html_document:
     theme: flatly
     highlight: zenburn
@@ -10,8 +14,6 @@ output:
     toc: yes
     toc_float: yes
     code_folding: show
-  pdf_document:
-    toc: yes
 ---
 
 ```{r}
@@ -553,9 +555,9 @@ paths_allowed("https://www.opensecrets.org")
 
 base_url <- "https://www.opensecrets.org/political-action-committees-pacs/foreign-connected-pacs/2022"
 
-contributions_tables <- base_url %>% 
-  read_html()
-  
+contributions_tables <- base_url %>%
+  read_html() 
+
 ```
 
 ```{r}
