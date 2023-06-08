@@ -123,7 +123,7 @@ tailnum_depts <- flights %>%
                   arrange(desc(count)) %>%
                   select(tailnum, count)
 
-view(tailnum_depts)
+head(tailnum_depts)
 
 plane_depts <- left_join(tailnum_depts, planes, "tailnum") %>%
                 filter(!is.na(tailnum))
@@ -545,7 +545,7 @@ cancellations %>%
 
 age_gaps <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2023/2023-02-14/age_gaps.csv')
 
-view(age_gaps)
+head(age_gaps)
 
 # First checking the distribution of age_difference to get an overview of the variable of interest
 
